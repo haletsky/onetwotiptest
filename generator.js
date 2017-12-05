@@ -18,7 +18,7 @@ module.exports = class Generator {
 
     setInterval(generate, 500)
 
-    // Simulate crash of generator
-    setTimeout(() => undefined_variable, 5000)
+    // Simulate crash
+    // setTimeout(() => undefined_variable, 5000)
   }
 }
