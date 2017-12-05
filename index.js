@@ -5,44 +5,48 @@ const port = argv.port || 6379
 const host = argv.host || '127.0.0.1'
 const isGenerator = argv.generator
 const errorList = 'errorList'
+let messageCounter = 0
 const channels = {
   system: 'system',
   messages: 'messages'
 }
 
-const client = redis.createClient({
+const publisher = redis.createClient({
+  host,
+  port
+})
+const subscriber = redis.createClient({
   host,
   port
 })
 
 if (argv['get-errors']) {
-  client.lrange(errorList, 0, -1, (err, list) => {
+  // Get errors, delete them and quit
+  publisher.lrange(errorList, 0, -1, (err, list) => {
     if (!err) console.log(list)
     else console.error(err)
-    client.del(errorList, err => {
+    publisher.del(errorList, err => {
       if (!err) {
-        client.quit()
+        publisher.quit()
         process.exit(0)
       } else console.log(err)
     })
   })
 } else {
   function generatorLogic () {
-    let messageCount = 0
-
     // Handle "crashes"
-    process.on('SIGINT', () => client.publish(channels.system, 'disconect', process.exit))
+    process.on('SIGINT', () => publisher.publish(channels.system, 'disconect', process.exit))
 
     const generate = () => {
-      console.log('emit message:', messageCount)
-      client.publish(channels.messages, messageCount++)
+      console.log('emit message:', messageCounter)
+      publisher.publish(channels.messages, messageCounter++)
     }
 
     setInterval(generate, 500)
   }
 
   function observerLogic () {
-    client.on('message', (channel, message) => {
+    subscriber.on('message', (channel, message) => {
       console.log(channel, message)
       switch (channel) {
         case channels.messages:
@@ -56,28 +60,24 @@ if (argv['get-errors']) {
 
           eventHandler(message, (err, msg) => {
             if (err) {
-              // I don't know how to run LPUSH command while client are subscribed (documentation said, that you can't run anything but some pub\sub commands).
-              // So, I need do unsub, and then sub again.
-              client.unsubscribe(channels.messages, channels.system, err => {
-                if (!err) {
-                  client.send_command('lpush', [errorList, msg], err => {
-                    if (!err) {
-                      client.subscribe(channels.messages, channels.system)
-                    } else console.error('senc_command ERROR:', err)
-                  })
-                } else console.error('Unsubscribe ERROR:', err)
-              })
+              publisher.send_command('lpush', [errorList, msg])
             }
           })
           break
         case channels.system:
+          // TODO: unsub -> get uuid of current generator -> if nil put own uuid -> become an generator -> check that uuid is equal with redis -> start emitting messages
+          publisher.exists('generator-id', (err, id) => {
+            if (!err && !id) {
+              publisher.set('generator-id', Math.random(), () => subscriber.quit(() => generatorLogic()))
+            } else console.error('something goes wrong', err, id)
+          })
           break
         default:
           console.error('Undefined channel.')
       }
     })
 
-    client.subscribe(channels.messages, channels.system)
+    subscriber.subscribe(channels.messages, channels.system)
   }
 
   if (isGenerator) generatorLogic()
