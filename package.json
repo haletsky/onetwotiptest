@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "generator": "node index.js --generator",
+    "getErrors": "node index.js --get-errors",
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

@@ -9,58 +9,52 @@ module.exports = class Listener {
   }
 
   run () {
-    this.connection.on('message', (channel, message) => {
-      switch (channel) {
-        case channels.messages:
-          const eventHandler = (msg, callback) => {
-            this._lastMessage = msg
-
-            const onComplete = () => {
-              var error = Math.random() > 0.85
-              callback(error, msg)
-            }
-            setTimeout(onComplete, Math.floor(Math.random() * 1000))
-          }
-
-          eventHandler(message, (err, msg) => {
-            if (err) {
-              this.unsubscribe()
-                .then(() => this.connection.send_command('lpush', ['errorList', msg]))
-                .then(() => this.subscribe())
-                .catch(console.error)
-            } else console.log('Completed message', msg)
+    const eventHandler = (c, message) => {
+      if (message === 'GENERATOR_DISCONNECTED') { // We need to get first listener in stack and let him become generator
+        this.unsubscribe().then(() => {
+          this.connection.lindex('listeners', 0, (err, id) => {
+            if (!err) {
+              if (this.id === Number(id)) {
+                this.connection.lpop('listeners', () => (new Generator(this.connection, Number(this._lastMessage) + 1)).run())
+              } else {
+                this.subscribe().catch(console.error)
+              }
+            } else console.error(err)
           })
-          break
-        case channels.system:
-          if (message === 'GENERATOR_DISCONNECTED') {
-            this.unsubscribe().then(() => {
-              // Get first actual connection to let him
-              this.connection.lindex('listeners', 0, (err, id) => {
-                if (!err) {
-                  console.log('First worked connection is', id, ' and this is', this.id)
-                  if (this.id === Number(id)) {
-                    this.connection.lpop('listeners', () => (new Generator(this.connection, this._lastMessage)).run())
-                  } else {
-                    this.subscribe().catch(console.error)
-                  }
-                } else console.error(err)
-              }).catch(console.error)
-            })
-          }
-          break
-        default:
-          console.error('Undefined channel.')
-      }
-    })
+        }).catch(console.error)
+      } else {
+        const messageProcessing = (msg, callback) => {
+          this._lastMessage = msg
 
+          const onComplete = () => {
+            var error = Math.random() > 0.85
+            callback(error, msg)
+          }
+
+          // Simulate work...
+          setTimeout(onComplete, Math.floor(Math.random() * 1000))
+        }
+
+        messageProcessing(message, (err, msg) => {
+          if (err) {
+            this.unsubscribe()
+              .then(() => new Promise((res, rej) => this.connection.send_command('lpush', ['errorList', msg], e => e ? rej(e) : res())))
+              .then(() => this.subscribe())
+              .catch(console.error)
+          } else console.log('Completed message:', msg)
+        })
+      }
+    }
+
+    this.connection.on('message', eventHandler)
     this.subscribe()
   }
 
   unsubscribe () {
-    return new Promise((res, rej) => this.connection.unsubscribe(channels.messages, channels.system, (e, r) => e ? rej(e) : res(r)))
+    return new Promise((res, rej) => this.connection.unsubscribe(channels.messages, (e, r) => e ? rej(e) : res(r)))
   }
 
   subscribe () {
-    return new Promise((res, rej) => this.connection.subscribe(channels.messages, channels.system, (e, r) => e ? rej(e) : res(r)))
+    return new Promise((res, rej) => this.connection.subscribe(channels.messages, (e, r) => e ? rej(e) : res(r)))
   }
 }

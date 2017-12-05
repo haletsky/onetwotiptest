@@ -5,7 +5,9 @@ module.exports = class Generator {
     this.connection = connection
     this.messageCounter = messageCounter
 
-    process.on('exit', () => this.connection.publish(channels.system, 'GENERATOR_DISCONNECTED'))
+    // Handle crashes
+    process.on('exit', () => this.connection.publish(channels.messages, 'GENERATOR_DISCONNECTED'))
+    process.on('SIGINT', process.exit)
   }
 
   run () {
